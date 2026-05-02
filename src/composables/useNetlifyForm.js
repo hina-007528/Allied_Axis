@@ -134,35 +134,83 @@ export async function submitNetlifyForm(formEl, actionPath = '/') {
     params.set('form-name', formName);
   }
 
-  const path = actionPath.startsWith('/') ? actionPath : `/${actionPath}`;
-  const defaultUrl =
-    typeof window !== 'undefined' ? new URL(path, window.location.origin).href : actionPath;
+  /**
+   * POST must hit the URL where `index.html` (with hidden Netlify forms) is served.
+   * On Netlify, POST to `/` can 404 when the SPA splat `/* → /index.html` wins before Forms;
+   * POST to `/index.html` matches the real file and is reliably accepted.
+   * Subpath hosts (e.g. GitHub Pages): BASE_URL + `index.html` stays correct.
+   */
+  const base = import.meta.env.BASE_URL || '/';
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const actionAttr = (formEl.getAttribute('action') || actionPath || '/').trim() || '/';
+  const appRoot =
+    typeof window !== 'undefined' ? new URL(base, origin).href : actionPath;
+
+  function submitUrlForRoot(preferIndexHtml) {
+    if (preferIndexHtml) return new URL('index.html', appRoot).href;
+    return appRoot;
+  }
+
+  function resolveSubmitUrl() {
+    if (typeof window === 'undefined') return actionPath;
+    if (actionAttr === '/' || actionAttr === '') {
+      return submitUrlForRoot(true);
+    }
+    return new URL(actionAttr.replace(/^\//, ''), appRoot).href;
+  }
 
   /** In Vite dev / preview, real Netlify handler is not on this origin — use dev proxy to real site */
   const useDevForward =
     import.meta.env.DEV &&
     typeof window !== 'undefined' &&
     (window.location.port === '5173' || window.location.port === '4173');
-  const url = useDevForward
+  const primaryUrl = useDevForward
     ? new URL('/__netlify_form_forward', window.location.origin).href
-    : defaultUrl;
+    : resolveSubmitUrl();
+
+  const fetchOpts = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      Accept: 'application/json, text/plain, */*'
+    },
+    body: params.toString(),
+    credentials: 'same-origin'
+  };
 
   let res;
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Accept: 'application/json, text/plain, */*'
-      },
-      body: params.toString(),
-      credentials: 'same-origin'
-    });
+    res = await fetch(primaryUrl, fetchOpts);
   } catch {
     return {
       ok: false,
       error: 'Network error. Check your connection and try again, or email info@alliedaxis.digital.'
     };
+  }
+
+  /** If primary was index.html, retry bare app root; if root was primary, retry index.html */
+  if (!useDevForward && res.status === 404 && typeof window !== 'undefined') {
+    const rel = actionAttr.replace(/^\//, '');
+    const pathname = (() => {
+      try {
+        return new URL(primaryUrl).pathname;
+      } catch {
+        return '';
+      }
+    })();
+    const primaryWasIndexHtml =
+      pathname === '/index.html' || pathname.endsWith('/index.html');
+    const fallback =
+      actionAttr === '/' || actionAttr === ''
+        ? submitUrlForRoot(!primaryWasIndexHtml)
+        : new URL('index.html', new URL(`${rel.endsWith('/') ? rel : `${rel}/`}`, appRoot)).href;
+    if (fallback !== primaryUrl) {
+      try {
+        res = await fetch(fallback, fetchOpts);
+      } catch {
+        /* keep first res */
+      }
+    }
   }
 
   const status = res.status;
@@ -175,7 +223,7 @@ export async function submitNetlifyForm(formEl, actionPath = '/') {
   let detail = `Something went wrong (server responded ${status}). Please email info@alliedaxis.digital.`;
   if (status === 404) {
     detail =
-      'Form endpoint returned 404. If you are on localhost (Vite), deploy to Netlify or run `netlify dev` — the dev server cannot receive submissions. On the live site, trigger a redeploy and confirm Forms are enabled in the Netlify UI.';
+      'Form submission was not accepted (404). In the Netlify dashboard, open this site → Forms → Usage and configuration → ensure form detection is enabled, then redeploy. Also confirm the deploy that built your `index.html` (with `data-netlify` forms) is the one live. For GitHub Pages or other hosts, rebuild so BASE_URL matches the site path.';
   }
 
   return { ok: false, error: detail };

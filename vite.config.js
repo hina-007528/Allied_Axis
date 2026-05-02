@@ -34,7 +34,7 @@ function netlifyFormForwardPlugin() {
       }
       const body = await readBody(req);
       try {
-        const r = await fetch(`${forwardOrigin}/`, {
+        const r = await fetch(`${forwardOrigin}/index.html`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
