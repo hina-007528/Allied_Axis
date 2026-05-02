@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /netlify/
+
+Sitemap: https://allied-axis.netlify.app/sitemap.xml
