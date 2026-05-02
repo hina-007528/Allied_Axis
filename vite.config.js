@@ -5,6 +5,10 @@ import { fileURLToPath, URL } from 'node:url';
 // Resolve project root from this file so `vite` works even if the shell cwd is wrong
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
+/** GitHub Pages project site: https://<user>.github.io/<repo>/ — set in CI via GITHUB_PAGES=true */
+const base =
+  process.env.GITHUB_PAGES === 'true' ? '/Allied_Axis/' : '/';
+
 /** Dev/preview: Netlify Forms only exist on the deployed site — forward POSTs there so submissions actually arrive while using `npm run dev` / `vite preview`. */
 function netlifyFormForwardPlugin() {
   const forwardOrigin = (
@@ -59,6 +63,7 @@ function netlifyFormForwardPlugin() {
 }
 
 export default defineConfig({
+  base,
   root: projectRoot,
   plugins: [vue(), netlifyFormForwardPlugin()],
   resolve: {
